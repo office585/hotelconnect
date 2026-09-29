@@ -14,11 +14,12 @@ LOGIN_URL = "https://p.hotelconnect.hu/login"
 EMAIL = os.environ.get("HOTELCONNECT_EMAIL", "buki.bertold@mavericklodges.com")
 PASSWORD = os.environ.get("HOTELCONNECT_PASSWORD", "Lebonote10@@@@")
 
-# Temp / Munkamenet mappa
+# Temp / Letöltési mappa
 DOWNLOAD_DIR = Path.home() / "Downloads"
 DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-# Várakozások (másodperc)
+# Szigorú várakozási idők
+LOGIN_TIMEOUT_MS = 15000  # 15 másodperc (ha elakad, azonnal elszáll)
 WAIT_COMPANY = 3
 WAIT_NAV = 2
 
@@ -57,7 +58,6 @@ def upload_to_drive(drive_service, file_path, folder_id, file_name):
         return
 
     try:
-        # Ellenőrizzük, létezik-e már ilyen nevű fájl a mappában
         query = f"'{folder_id}' in parents and name = '{file_name}' and trashed = false"
         results = drive_service.files().list(q=query, fields="files(id, name)").execute()
         files = results.get("files", [])
@@ -105,48 +105,64 @@ def main():
     drive_service = get_drive_service()
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(
-            headless=False
-        )
+        browser = p.chromium.launch(headless=False)
 
         context = browser.new_context(
             viewport={"width": 1440, "height": 900},
-            accept_downloads=True
+            accept_downloads=True,
+            locale="hu-HU",
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
         )
 
         page = context.new_page()
-        page.set_default_timeout(60000)
+        page.set_default_timeout(30000)
 
         # =====================================================
-        # LOGIN (KÉZI GÉPELÉS SZIMULÁCIÓ)
+        # LOGIN (ENTER + KATTINTÁS KETTŐS PRÓBÁLKOZÁS)
         # =====================================================
         print("Login oldal megnyitása...")
-        page.goto(LOGIN_URL, wait_until="networkidle")
-        time.sleep(2)
-
-        print("Email mező kijelölése és gépelés...")
-        email_field = page.locator('input[type="email"]')
-        email_field.click()
-        time.sleep(0.5)
-        email_field.press_sequentially(EMAIL, delay=80)
-
-        time.sleep(0.5)
-
-        print("Jelszó mező kijelölése és gépelés...")
-        password_field = page.locator('input[type="password"]')
-        password_field.click()
-        time.sleep(0.5)
-        password_field.press_sequentially(PASSWORD, delay=80)
-
+        page.goto(LOGIN_URL, wait_until="domcontentloaded")
         time.sleep(1)
 
-        print("Bejelentkezés (Enter lenyomása)...")
-        password_field.press("Enter")
+        print("Email mező kitöltése...")
+        email_field = page.locator('input[type="email"]')
+        email_field.click()
+        email_field.fill(EMAIL)
 
-        # Megvárjuk az oldalsáv cég gombjainak megjelenését (sikeres belépés garanciája)
-        print("Várakozás a sikeres bejelentkezésre...")
-        company_buttons = page.locator('aside button[title*="NTAK jelentés"]')
-        company_buttons.first.wait_for(state="visible", timeout=60000)
+        print("Jelszó mező kitöltése...")
+        password_field = page.locator('input[type="password"]')
+        password_field.click()
+        password_field.fill(PASSWORD)
+
+        time.sleep(0.5)
+
+        print("Bejelentkezés indítása (Enter + Gomb kattintás)...")
+        # 1. Enter lenyomása a jelszó mezőben
+        password_field.press("Enter")
+        time.sleep(0.3)
+
+        # 2. Kattintás a pontos gombra matches type=submit
+        submit_btn = page.locator('button[type="submit"]').filter(has_text="Bejelentkezés")
+        if submit_btn.is_visible():
+            submit_btn.click(force=True)
+
+        # Várakozás maximum 15 mp-ig a sikeres belépésre
+        print(f"Várakozás a sikeres bejelentkezésre (Szigorú timeout: {LOGIN_TIMEOUT_MS // 1000} mp)...")
+        try:
+            company_buttons = page.locator('aside button').filter(has=page.locator("span.truncate"))
+            company_buttons.first.wait_for(state="visible", timeout=LOGIN_TIMEOUT_MS)
+        except Exception as e:
+            page.screenshot(path="login_error.png")
+            print(f"\n[HIBA] Nem sikerült belépni {LOGIN_TIMEOUT_MS // 1000} mp alatt!")
+            print(f"Aktuális URL: {page.url}")
+            print("Képernyőkép elmentve: login_error.png")
+
+            # Látható hibaüzenet kiírása
+            alerts = page.locator('[role="alert"], .text-red-500, .error-message')
+            if alerts.count() > 0:
+                print("Hibaüzenet az oldalon:", alerts.first.inner_text().strip())
+
+            raise e
 
         print("Sikeres belépés!")
         print("Aktuális URL:", page.url)
@@ -226,7 +242,7 @@ def main():
                     exact=True
                 ).last
 
-                with page.expect_download(timeout=120000) as download_info:
+                with page.expect_download(timeout=60000) as download_info:
                     modal_xlsx_button.click()
 
                 download = download_info.value
@@ -244,7 +260,6 @@ def main():
                 # ---------------------------------------------
                 folder_id = DRIVE_FOLDERS.get(company_name)
                 if not folder_id:
-                    # Részleges egyezés keresése, ha a név nem 100%-ig pontos
                     for key, f_id in DRIVE_FOLDERS.items():
                         if key.lower() in company_name.lower() or company_name.lower() in key.lower():
                             folder_id = f_id
