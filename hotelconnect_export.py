@@ -15,7 +15,7 @@ from googleapiclient.http import MediaFileUpload
 
 
 # ============================================================
-# BEÁLLÍTÁSOK
+# ALAP BEÁLLÍTÁSOK
 # ============================================================
 
 LOGIN_URL = "https://p.hotelconnect.hu/login"
@@ -23,7 +23,9 @@ LOGIN_URL = "https://p.hotelconnect.hu/login"
 EMAIL = os.environ["HOTELCONNECT_EMAIL"]
 PASSWORD = os.environ["HOTELCONNECT_PASSWORD"]
 
-GDRIVE_SERVICE_ACCOUNT_JSON = os.environ["GDRIVE_SERVICE_ACCOUNT_JSON"]
+GDRIVE_SERVICE_ACCOUNT_JSON = os.environ[
+    "GDRIVE_SERVICE_ACCOUNT_JSON"
+]
 
 WAIT_COMPANY = 3
 WAIT_NAV = 2
@@ -32,7 +34,15 @@ CURRENT_YEAR = datetime.now().year
 
 
 # ============================================================
-# HOTELCONNECT EGYSÉG -> DRIVE MAPPA
+# HOTELCONNECT CÉG -> GOOGLE DRIVE MAPPA
+# ============================================================
+#
+# Leo Boutique Rooms SZÁNDÉKOSAN NINCS BENNE.
+#
+# HotelConnect név:
+# Maverick City Lodge = Maverick Budapest Soho
+# Maverick Urban Lodge = Maverick Central Market
+# The Amberlyn Suite Hotel = Amberlyn Management Kft.
 # ============================================================
 
 COMPANIES = {
@@ -74,10 +84,11 @@ COMPANIES = {
 
 
 # ============================================================
-# GOOGLE DRIVE
+# GOOGLE DRIVE KAPCSOLAT
 # ============================================================
 
 def get_drive_service():
+
     service_account_info = json.loads(
         GDRIVE_SERVICE_ACCOUNT_JSON
     )
@@ -89,13 +100,19 @@ def get_drive_service():
         ],
     )
 
-    return build(
+    drive_service = build(
         "drive",
         "v3",
         credentials=credentials,
         cache_discovery=False,
     )
 
+    return drive_service
+
+
+# ============================================================
+# GOOGLE DRIVE FELTÖLTÉS
+# ============================================================
 
 def upload_or_replace_file(
     drive_service,
@@ -103,15 +120,17 @@ def upload_or_replace_file(
     folder_id,
     drive_filename,
 ):
-    """
-    Ha a fájl már létezik a mappában, frissíti.
-    Ha nincs, létrehozza.
-    """
 
-    safe_name = drive_filename.replace("'", "\\'")
+    # Megnézzük, létezik-e már ugyanilyen nevű fájl
+    # ugyanabban a Drive mappában.
+
+    escaped_name = drive_filename.replace(
+        "'",
+        "\\'"
+    )
 
     query = (
-        f"name = '{safe_name}' "
+        f"name = '{escaped_name}' "
         f"and '{folder_id}' in parents "
         f"and trashed = false"
     )
@@ -127,7 +146,10 @@ def upload_or_replace_file(
         .execute()
     )
 
-    existing_files = result.get("files", [])
+    existing_files = result.get(
+        "files",
+        []
+    )
 
     media = MediaFileUpload(
         str(local_file),
@@ -135,7 +157,12 @@ def upload_or_replace_file(
         resumable=True,
     )
 
+    # --------------------------------------------------------
+    # HA MÁR LÉTEZIK -> FRISSÍTÉS
+    # --------------------------------------------------------
+
     if existing_files:
+
         file_id = existing_files[0]["id"]
 
         print(
@@ -143,13 +170,22 @@ def upload_or_replace_file(
             f"{drive_filename}"
         )
 
-        drive_service.files().update(
-            fileId=file_id,
-            media_body=media,
-            supportsAllDrives=True,
-        ).execute()
+        (
+            drive_service.files()
+            .update(
+                fileId=file_id,
+                media_body=media,
+                supportsAllDrives=True,
+            )
+            .execute()
+        )
+
+    # --------------------------------------------------------
+    # HA MÉG NINCS -> LÉTREHOZÁS
+    # --------------------------------------------------------
 
     else:
+
         print(
             f"Új Drive fájl létrehozása: "
             f"{drive_filename}"
@@ -160,23 +196,36 @@ def upload_or_replace_file(
             "parents": [folder_id],
         }
 
-        drive_service.files().create(
-            body=metadata,
-            media_body=media,
-            fields="id",
-            supportsAllDrives=True,
-        ).execute()
+        (
+            drive_service.files()
+            .create(
+                body=metadata,
+                media_body=media,
+                fields="id",
+                supportsAllDrives=True,
+            )
+            .execute()
+        )
 
 
 # ============================================================
 # XLSX -> NYERS CSV
 # ============================================================
 
-def xlsx_to_csv(xlsx_path, csv_path):
-    """
-    Csak a cellák tényleges értékét menti.
-    Nincs formázás, nincs stílus, nincs Excel sallang.
-    """
+def xlsx_to_csv(
+    xlsx_path,
+    csv_path
+):
+
+    print(
+        "XLSX átalakítása nyers CSV-vé..."
+    )
+
+    # read_only:
+    # nem tölti memóriába az egész hatalmas Excelt
+    #
+    # data_only:
+    # képlet helyett annak értékét olvassa
 
     workbook = load_workbook(
         filename=xlsx_path,
@@ -202,55 +251,80 @@ def xlsx_to_csv(xlsx_path, csv_path):
         for row in worksheet.iter_rows(
             values_only=True
         ):
-            writer.writerow(
-                [
-                    "" if value is None else value
-                    for value in row
-                ]
-            )
+
+            cleaned_row = []
+
+            for value in row:
+
+                if value is None:
+                    cleaned_row.append("")
+                else:
+                    cleaned_row.append(value)
+
+            writer.writerow(cleaned_row)
 
     workbook.close()
 
 
 # ============================================================
-# HOTELCONNECT
+# FŐ PROGRAM
 # ============================================================
 
 def run():
+
+    # Google Drive kapcsolat
     drive_service = get_drive_service()
 
-    # Ideiglenes könyvtár:
-    # GitHub Actions futás végén úgyis eltűnik.
-    temp_dir = Path(tempfile.mkdtemp())
+    # GitHub futás alatt ideiglenes mappa
+    temp_dir = Path(
+        tempfile.mkdtemp()
+    )
 
-    print(f"Ideiglenes könyvtár: {temp_dir}")
+    print(
+        "Ideiglenes könyvtár:",
+        temp_dir
+    )
 
-    success = []
+    successful = []
     failed = []
+
+    # ========================================================
+    # PLAYWRIGHT
+    # ========================================================
 
     with sync_playwright() as p:
 
+        # FONTOS:
+        # ugyanaz, mint a lokálisan letesztelt működő verzióban.
         browser = p.chromium.launch(
-            headless=True
+            headless=False
         )
 
         context = browser.new_context(
             viewport={
                 "width": 1440,
-                "height": 900
+                "height": 900,
             },
             accept_downloads=True,
         )
 
         page = context.new_page()
 
-        page.set_default_timeout(60000)
+        page.set_default_timeout(
+            60000
+        )
 
         # ====================================================
         # LOGIN
         # ====================================================
+        #
+        # EZ A RÉSZ SZÁNDÉKOSAN UGYANAZ,
+        # MINT A MŰKÖDŐ LOKÁLIS KÓDBAN.
+        # ====================================================
 
-        print("\nHotelConnect megnyitása...")
+        print(
+            "Login oldal megnyitása..."
+        )
 
         page.goto(
             LOGIN_URL,
@@ -259,72 +333,138 @@ def run():
 
         page.locator(
             'input[type="email"]'
-        ).fill(EMAIL)
+        ).fill(
+            EMAIL
+        )
 
         page.locator(
             'input[type="password"]'
-        ).fill(PASSWORD)
+        ).fill(
+            PASSWORD
+        )
+
+        print(
+            "Bejelentkezés..."
+        )
 
         page.locator(
             'button[type="submit"]'
         ).click()
 
+        # Login oldal elhagyása
         page.wait_for_url(
             lambda url: "/login" not in url,
             timeout=60000
         )
 
-        print("Sikeres belépés.")
+        print(
+            "Sikeres belépés."
+        )
 
-        time.sleep(WAIT_COMPANY)
+        print(
+            "Aktuális URL:",
+            page.url
+        )
+
+        print(
+            f"Várakozás login után: "
+            f"{WAIT_COMPANY} mp"
+        )
+
+        time.sleep(
+            WAIT_COMPANY
+        )
 
         # ====================================================
-        # ELÉRHETŐ EGYSÉGEK KIOLVASÁSA
+        # HOTELCONNECT EGYSÉGEK KIOLVASÁSA
         # ====================================================
 
-        buttons = page.locator(
+        company_buttons = page.locator(
             'aside button[title*="NTAK jelentés"]'
+        )
+
+        company_count = (
+            company_buttons.count()
+        )
+
+        print(
+            f"\nTalált HotelConnect egységek: "
+            f"{company_count}"
         )
 
         found_companies = []
 
-        for i in range(buttons.count()):
+        for i in range(
+            company_count
+        ):
 
-            button = buttons.nth(i)
+            button = (
+                company_buttons.nth(i)
+            )
 
-            name = (
+            company_name = (
                 button
                 .locator("span.truncate")
                 .inner_text()
                 .strip()
             )
 
-            found_companies.append(name)
+            found_companies.append(
+                company_name
+            )
 
-        print("\nHotelConnect egységek:")
-
-        for name in found_companies:
-            print(f" - {name}")
+            print(
+                f"  {i + 1}. "
+                f"{company_name}"
+            )
 
         # ====================================================
-        # CSAK A KÉRT 7 EGYSÉG
+        # CSAK A KÉRT 7 CÉGEN MEGYÜNK VÉGIG
         # ====================================================
 
-        for company_name, config in COMPANIES.items():
+        total_companies = len(
+            COMPANIES
+        )
 
-            print("\n")
-            print("=" * 65)
-            print(company_name)
-            print("=" * 65)
+        for index, (
+            company_name,
+            config
+        ) in enumerate(
+            COMPANIES.items(),
+            start=1
+        ):
 
-            if company_name not in found_companies:
+            print(
+                "\n" + "=" * 65
+            )
+
+            print(
+                f"[{index}/{total_companies}] "
+                f"{company_name}"
+            )
+
+            print(
+                "=" * 65
+            )
+
+            # ------------------------------------------------
+            # Ellenőrzés
+            # ------------------------------------------------
+
+            if (
+                company_name
+                not in found_companies
+            ):
 
                 print(
-                    "HIBA: az egység nem található "
+                    "HIBA: ez az egység nincs "
                     "a HotelConnect listában."
                 )
 
-                failed.append(company_name)
+                failed.append(
+                    company_name
+                )
+
                 continue
 
             try:
@@ -333,92 +473,132 @@ def run():
                 # CÉG KIVÁLASZTÁSA
                 # ============================================
 
+                print(
+                    f"Cég kiválasztása: "
+                    f"{company_name}"
+                )
+
                 company_button = (
                     page
                     .locator(
-                        'aside button[title*="NTAK jelentés"]'
+                        'aside button'
                     )
                     .filter(
                         has=page.locator(
                             "span.truncate",
-                            has_text=company_name,
+                            has_text=company_name
                         )
                     )
                 )
 
-                print(
-                    f"Egység kiválasztása: "
-                    f"{company_name}"
-                )
-
                 company_button.click()
 
-                time.sleep(WAIT_COMPANY)
+                print(
+                    f"Várakozás cégváltás után: "
+                    f"{WAIT_COMPANY} mp"
+                )
+
+                time.sleep(
+                    WAIT_COMPANY
+                )
 
                 # ============================================
-                # XLSX MENÜ
+                # XLSX LETÖLTÉSE MENÜ
                 # ============================================
 
                 print(
-                    "XLSX letöltés menü megnyitása..."
+                    "XLSX letöltése menü megnyitása..."
                 )
 
-                page.get_by_role(
-                    "button",
-                    name="XLSX letöltése",
-                    exact=True,
-                ).first.click()
+                xlsx_buttons = (
+                    page.get_by_role(
+                        "button",
+                        name="XLSX letöltése",
+                        exact=True
+                    )
+                )
 
-                time.sleep(WAIT_NAV)
+                xlsx_buttons.first.click()
+
+                time.sleep(
+                    WAIT_NAV
+                )
 
                 # ============================================
                 # EZ AZ ÉV
                 # ============================================
 
-                print("'Ez az év' kiválasztása...")
+                print(
+                    "'Ez az év' kiválasztása..."
+                )
 
                 page.get_by_role(
                     "button",
                     name="Ez az év",
-                    exact=True,
+                    exact=True
                 ).click()
 
-                time.sleep(WAIT_NAV)
+                time.sleep(
+                    WAIT_NAV
+                )
 
                 # ============================================
-                # LETÖLTÉS
+                # LETÖLTÉS INDÍTÁSA
                 # ============================================
 
-                print("Export letöltése...")
+                print(
+                    "XLSX export indítása..."
+                )
+
+                modal_xlsx_button = (
+                    page.get_by_role(
+                        "button",
+                        name="XLSX letöltése",
+                        exact=True
+                    ).last
+                )
 
                 with page.expect_download(
                     timeout=180000
                 ) as download_info:
 
-                    page.get_by_role(
-                        "button",
-                        name="XLSX letöltése",
-                        exact=True,
-                    ).last.click()
+                    modal_xlsx_button.click()
 
-                download = download_info.value
+                download = (
+                    download_info.value
+                )
+
+                # ============================================
+                # IDEIGLENES XLSX
+                # ============================================
+
+                xlsx_filename = (
+                    f"{config['code']}_"
+                    f"{CURRENT_YEAR}.xlsx"
+                )
 
                 xlsx_path = (
                     temp_dir
-                    / f"{config['code']}_{CURRENT_YEAR}.xlsx"
+                    / xlsx_filename
                 )
 
                 download.save_as(
                     str(xlsx_path)
                 )
 
+                xlsx_size_mb = (
+                    xlsx_path.stat().st_size
+                    / 1024
+                    / 1024
+                )
+
                 print(
                     f"XLSX letöltve: "
-                    f"{xlsx_path.stat().st_size / 1024 / 1024:.2f} MB"
+                    f"{xlsx_size_mb:.2f} MB"
                 )
 
                 # ============================================
-                # CSV KÉSZÍTÉS
+                # CSV KÉSZÍTÉSE
                 # ============================================
 
                 csv_filename = (
@@ -432,34 +612,55 @@ def run():
                     / csv_filename
                 )
 
-                print(
-                    "Átalakítás nyers CSV-vé..."
-                )
-
                 xlsx_to_csv(
                     xlsx_path,
                     csv_path
                 )
 
-                print(
-                    f"CSV méret: "
-                    f"{csv_path.stat().st_size / 1024 / 1024:.2f} MB"
+                csv_size_mb = (
+                    csv_path.stat().st_size
+                    / 1024
+                    / 1024
                 )
 
-                # XLSX törlése
-                try:
-                    xlsx_path.unlink()
-                except Exception:
-                    pass
+                print(
+                    f"CSV elkészült: "
+                    f"{csv_size_mb:.2f} MB"
+                )
 
                 # ============================================
-                # DRIVE FELTÖLTÉS
+                # NAGY XLSX TÖRLÉSE
                 # ============================================
+
+                try:
+
+                    xlsx_path.unlink()
+
+                    print(
+                        "Ideiglenes XLSX törölve."
+                    )
+
+                except Exception as e:
+
+                    print(
+                        "XLSX törlési figyelmeztetés:",
+                        e
+                    )
+
+                # ============================================
+                # GOOGLE DRIVE
+                # ============================================
+
+                print(
+                    "Feltöltés Google Drive-ra..."
+                )
 
                 upload_or_replace_file(
                     drive_service=drive_service,
                     local_file=csv_path,
-                    folder_id=config["folder_id"],
+                    folder_id=config[
+                        "folder_id"
+                    ],
                     drive_filename=csv_filename,
                 )
 
@@ -467,42 +668,73 @@ def run():
                     f"KÉSZ: {company_name}"
                 )
 
-                success.append(company_name)
-
-                # helyi CSV sem kell tovább
-                try:
-                    csv_path.unlink()
-                except Exception:
-                    pass
-
-                time.sleep(WAIT_NAV)
-
-            except Exception as error:
-
-                print(
-                    f"HIBA: {company_name}"
+                successful.append(
+                    company_name
                 )
 
-                print(error)
+                # ============================================
+                # HELYI CSV TÖRLÉSE
+                # ============================================
 
-                failed.append(company_name)
-
-                # Ha modal nyitva maradt
                 try:
-                    cancel = page.get_by_role(
-                        "button",
-                        name="Mégse",
-                        exact=True,
-                    )
 
-                    if cancel.is_visible():
-                        cancel.click()
-                        time.sleep(WAIT_NAV)
+                    csv_path.unlink()
 
                 except Exception:
                     pass
 
+                # Menünavigáció közötti várakozás
+                time.sleep(
+                    WAIT_NAV
+                )
+
+            except Exception as e:
+
+                print(
+                    f"HIBA ennél a cégnél: "
+                    f"{company_name}"
+                )
+
+                print(
+                    str(e)
+                )
+
+                failed.append(
+                    company_name
+                )
+
+                # Ha modal nyitva maradt,
+                # megpróbáljuk bezárni.
+                try:
+
+                    cancel_button = (
+                        page.get_by_role(
+                            "button",
+                            name="Mégse",
+                            exact=True
+                        )
+                    )
+
+                    if (
+                        cancel_button.is_visible()
+                    ):
+
+                        cancel_button.click()
+
+                        time.sleep(
+                            WAIT_NAV
+                        )
+
+                except Exception:
+                    pass
+
+                # Nem áll meg az egész robot,
+                # megy a következő cégre.
                 continue
+
+        # ====================================================
+        # BÖNGÉSZŐ BEZÁRÁSA
+        # ====================================================
 
         browser.close()
 
@@ -510,28 +742,53 @@ def run():
     # ÖSSZEGZÉS
     # ========================================================
 
-    print("\n")
-    print("=" * 65)
-    print("FUTÁS VÉGE")
-    print("=" * 65)
+    print(
+        "\n" + "=" * 65
+    )
 
-    print("\nSikeres:")
+    print(
+        "FUTÁS VÉGE"
+    )
 
-    for name in success:
-        print(f" OK  {name}")
+    print(
+        "=" * 65
+    )
 
-    if failed:
-        print("\nHibás:")
+    print(
+        "\nSikeres cégek:"
+    )
 
-        for name in failed:
-            print(f" ERR {name}")
+    for company in successful:
 
-        raise RuntimeError(
-            f"{len(failed)} egység feldolgozása sikertelen."
+        print(
+            f"OK: {company}"
         )
 
-    print("\nMinden egység sikeresen elkészült.")
+    if failed:
 
+        print(
+            "\nHibás cégek:"
+        )
+
+        for company in failed:
+
+            print(
+                f"HIBA: {company}"
+            )
+
+        raise RuntimeError(
+            f"{len(failed)} cég "
+            f"feldolgozása sikertelen."
+        )
+
+    print(
+        "\nMinden cég sikeresen elkészült."
+    )
+
+
+# ============================================================
+# INDÍTÁS
+# ============================================================
 
 if __name__ == "__main__":
     run()
