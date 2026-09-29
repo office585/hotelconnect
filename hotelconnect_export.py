@@ -36,14 +36,6 @@ CURRENT_YEAR = datetime.now().year
 # ============================================================
 # HOTELCONNECT CÉG -> GOOGLE DRIVE MAPPA
 # ============================================================
-#
-# Leo Boutique Rooms SZÁNDÉKOSAN NINCS BENNE.
-#
-# HotelConnect név:
-# Maverick City Lodge = Maverick Budapest Soho
-# Maverick Urban Lodge = Maverick Central Market
-# The Amberlyn Suite Hotel = Amberlyn Management Kft.
-# ============================================================
 
 COMPANIES = {
     "Maverick Athenaeum": {
@@ -121,9 +113,6 @@ def upload_or_replace_file(
     drive_filename,
 ):
 
-    # Megnézzük, létezik-e már ugyanilyen nevű fájl
-    # ugyanabban a Drive mappában.
-
     escaped_name = drive_filename.replace(
         "'",
         "\\'"
@@ -157,10 +146,6 @@ def upload_or_replace_file(
         resumable=True,
     )
 
-    # --------------------------------------------------------
-    # HA MÁR LÉTEZIK -> FRISSÍTÉS
-    # --------------------------------------------------------
-
     if existing_files:
 
         file_id = existing_files[0]["id"]
@@ -179,10 +164,6 @@ def upload_or_replace_file(
             )
             .execute()
         )
-
-    # --------------------------------------------------------
-    # HA MÉG NINCS -> LÉTREHOZÁS
-    # --------------------------------------------------------
 
     else:
 
@@ -221,12 +202,6 @@ def xlsx_to_csv(
         "XLSX átalakítása nyers CSV-vé..."
     )
 
-    # read_only:
-    # nem tölti memóriába az egész hatalmas Excelt
-    #
-    # data_only:
-    # képlet helyett annak értékét olvassa
-
     workbook = load_workbook(
         filename=xlsx_path,
         read_only=True,
@@ -261,7 +236,9 @@ def xlsx_to_csv(
                 else:
                     cleaned_row.append(value)
 
-            writer.writerow(cleaned_row)
+            writer.writerow(
+                cleaned_row
+            )
 
     workbook.close()
 
@@ -272,10 +249,8 @@ def xlsx_to_csv(
 
 def run():
 
-    # Google Drive kapcsolat
     drive_service = get_drive_service()
 
-    # GitHub futás alatt ideiglenes mappa
     temp_dir = Path(
         tempfile.mkdtemp()
     )
@@ -288,14 +263,10 @@ def run():
     successful = []
     failed = []
 
-    # ========================================================
-    # PLAYWRIGHT
-    # ========================================================
-
     with sync_playwright() as p:
 
         # FONTOS:
-        # ugyanaz, mint a lokálisan letesztelt működő verzióban.
+        # ugyanaz a mód, mint a lokálisan működő verzióban
         browser = p.chromium.launch(
             headless=False
         )
@@ -316,10 +287,6 @@ def run():
 
         # ====================================================
         # LOGIN
-        # ====================================================
-        #
-        # EZ A RÉSZ SZÁNDÉKOSAN UGYANAZ,
-        # MINT A MŰKÖDŐ LOKÁLIS KÓDBAN.
         # ====================================================
 
         print(
@@ -351,9 +318,17 @@ def run():
             'button[type="submit"]'
         ).click()
 
-        # Login oldal elhagyása
-        page.wait_for_url(
-            lambda url: "/login" not in url,
+        # ====================================================
+        # LOGIN UTÁNI OLDAL MEGVÁRÁSA
+        #
+        # NEM URL-T NÉZÜNK,
+        # HANEM AZ EGYÉRTELMŰEN BELÉPÉS UTÁNI ELEMET.
+        # ====================================================
+
+        page.locator(
+            'aside button[title*="NTAK jelentés"]'
+        ).first.wait_for(
+            state="visible",
             timeout=60000
         )
 
@@ -447,10 +422,6 @@ def run():
                 "=" * 65
             )
 
-            # ------------------------------------------------
-            # Ellenőrzés
-            # ------------------------------------------------
-
             if (
                 company_name
                 not in found_companies
@@ -503,7 +474,7 @@ def run():
                 )
 
                 # ============================================
-                # XLSX LETÖLTÉSE MENÜ
+                # XLSX LETÖLTÉS MENÜ
                 # ============================================
 
                 print(
@@ -543,7 +514,7 @@ def run():
                 )
 
                 # ============================================
-                # LETÖLTÉS INDÍTÁSA
+                # MODÁLIS XLSX LETÖLTÉS
                 # ============================================
 
                 print(
@@ -629,7 +600,7 @@ def run():
                 )
 
                 # ============================================
-                # NAGY XLSX TÖRLÉSE
+                # IDEIGLENES XLSX TÖRLÉSE
                 # ============================================
 
                 try:
@@ -648,7 +619,7 @@ def run():
                     )
 
                 # ============================================
-                # GOOGLE DRIVE
+                # DRIVE FELTÖLTÉS
                 # ============================================
 
                 print(
@@ -673,7 +644,7 @@ def run():
                 )
 
                 # ============================================
-                # HELYI CSV TÖRLÉSE
+                # IDEIGLENES CSV TÖRLÉSE
                 # ============================================
 
                 try:
@@ -683,7 +654,6 @@ def run():
                 except Exception:
                     pass
 
-                # Menünavigáció közötti várakozás
                 time.sleep(
                     WAIT_NAV
                 )
@@ -703,8 +673,6 @@ def run():
                     company_name
                 )
 
-                # Ha modal nyitva maradt,
-                # megpróbáljuk bezárni.
                 try:
 
                     cancel_button = (
@@ -728,13 +696,7 @@ def run():
                 except Exception:
                     pass
 
-                # Nem áll meg az egész robot,
-                # megy a következő cégre.
                 continue
-
-        # ====================================================
-        # BÖNGÉSZŐ BEZÁRÁSA
-        # ====================================================
 
         browser.close()
 
@@ -785,10 +747,6 @@ def run():
         "\nMinden cég sikeresen elkészült."
     )
 
-
-# ============================================================
-# INDÍTÁS
-# ============================================================
 
 if __name__ == "__main__":
     run()
