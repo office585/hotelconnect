@@ -1,115 +1,236 @@
-            print("Figyelem: a korábbi kód szerint csak az aktív munkalapot exportáljuk.", flush=True)
-        with csv_path.open("w", newline="", encoding="utf-8-sig") as stream:
-            writer = csv.writer(stream, lineterminator="\n")
-            for row in worksheet.iter_rows(values_only=True):
-                # A teljesen ures, akar csak formazott sorok nem foglalnak helyet.
-                if not any(value is not None and value != "" for value in row):
-                    continue
-                writer.writerow(["" if value is None else value for value in row])
-                rows_written += 1
-    finally:
-        workbook.close()
-    if not rows_written:
-        raise RuntimeError("Üres export: nem írom felül a korábbi Drive-fájlt.")
-    return rows_written
+import os
+import sys
+import time
+from pathlib import Path
+from playwright.sync_api import sync_playwright
+
+LOGIN_URL = "https://p.hotelconnect.hu/login"
+
+EMAIL = os.environ.get("HOTELCONNECT_EMAIL", "buki.bertold@mavericklodges.com")
+PASSWORD = os.environ.get("HOTELCONNECT_PASSWORD", "Lebonote10@@@@")
+
+# Windows / Local Letöltések mappa
+DOWNLOAD_DIR = Path.home() / "Downloads"
+DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+# Kért várakozások
+WAIT_COMPANY = 3
+WAIT_NAV = 2
 
 
-def close_export_dialog(page: Page) -> None:
-    cancel = page.get_by_role("button", name="Mégse", exact=True)
-    if cancel.count() == 1 and cancel.is_visible():
-        cancel.click()
-        pause(page, WAIT_NAV)
+def safe_filename(name):
+    """Fájlnévhez biztonságos cégnév."""
+    return (
+        name.replace("/", "_")
+        .replace("\\", "_")
+        .replace(":", "_")
+        .replace("*", "_")
+        .replace("?", "_")
+        .replace('"', "_")
+        .replace("<", "_")
+        .replace(">", "_")
+        .replace("|", "_")
+    )
 
 
-def run() -> None:
-    email = secret("HOTELCONNECT_EMAIL")
-    password = secret("HOTELCONNECT_PASSWORD")
-    secret("GDRIVE_SERVICE_ACCOUNT_JSON")
-    year = datetime.now(ZoneInfo("Europe/Budapest")).year
-    successful = []
-    failed = []
+def main():
+    with sync_playwright() as p:
+        browser = p.chromium.launch(
+            headless=False
+        )
 
-    with tempfile.TemporaryDirectory(prefix="hotelconnect-") as temporary:
-        directory = Path(temporary)
-        with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=False)
+        context = browser.new_context(
+            viewport={"width": 1440, "height": 900},
+            accept_downloads=True
+        )
+
+        page = context.new_page()
+        page.set_default_timeout(60000)
+
+        # =====================================================
+        # LOGIN
+        # =====================================================
+        print("Login oldal megnyitása...")
+        page.goto(LOGIN_URL, wait_until="domcontentloaded")
+
+        page.locator('input[type="email"]').fill(EMAIL)
+        page.locator('input[type="password"]').fill(PASSWORD)
+
+        print("Bejelentkezés...")
+        page.locator('button[type="submit"]').click()
+
+        # Login oldal elhagyása (JS ellenőrzés SPA / pushState esetére)
+        page.wait_for_function(
+            "() => !window.location.href.includes('/login')",
+            timeout=60000
+        )
+
+        print("Sikeres belépés.")
+        print("Aktuális URL:", page.url)
+
+        print(f"Várakozás login után: {WAIT_COMPANY} mp")
+        time.sleep(WAIT_COMPANY)
+
+        # =====================================================
+        # CÉGEK KIOLVASÁSA
+        # =====================================================
+
+        # Csak az Egységek oldalsáv gombjai
+        company_buttons = page.locator(
+            'aside button[title*="NTAK jelentés"]'
+        )
+
+        company_count = company_buttons.count()
+
+        print(f"\nTalált cégek száma: {company_count}")
+
+        companies = []
+
+        for i in range(company_count):
+            button = company_buttons.nth(i)
+
+            # A belső span tartalmazza a cég nevét
+            company_name = button.locator("span.truncate").inner_text().strip()
+
+            companies.append(company_name)
+            print(f"  {i + 1}. {company_name}")
+
+        # =====================================================
+        # CÉGEKEN VÉGIGMEGYÜNK
+        # =====================================================
+
+        for index, company_name in enumerate(companies, start=1):
+
+            print("\n" + "=" * 60)
+            print(f"[{index}/{len(companies)}] {company_name}")
+            print("=" * 60)
+
             try:
-                context = browser.new_context(
-                    viewport={"width": 1440, "height": 900},
-                    accept_downloads=True,
-                    locale="hu-HU",
-                    timezone_id="Europe/Budapest",
+                # ---------------------------------------------
+                # CÉGVÁLTÁS
+                # ---------------------------------------------
+                print(f"Cég kiválasztása: {company_name}")
+
+                company_button = page.locator(
+                    'aside button'
+                ).filter(
+                    has=page.locator(
+                        "span.truncate",
+                        has_text=company_name
+                    )
                 )
-                page = context.new_page()
-                page.set_default_timeout(60000)
-                login(page, email, password)
 
-                # A Drive kapcsolat csak a sikeres login utan kovetkezik.
-                drive_service = get_drive_service()
+                company_button.click()
+
+                print(f"Várakozás cégváltás után: {WAIT_COMPANY} mp")
+                time.sleep(WAIT_COMPANY)
+
+                # ---------------------------------------------
+                # XLSX LETÖLTÉSE - FŐ GOMB
+                # ---------------------------------------------
+                print("XLSX letöltése menü megnyitása...")
+
+                # Az első látható XLSX letöltése gomb
+                xlsx_buttons = page.get_by_role(
+                    "button",
+                    name="XLSX letöltése",
+                    exact=True
+                )
+
+                # Ekkor még elvileg csak a főoldali gomb látható
+                xlsx_buttons.first.click()
+
+                time.sleep(WAIT_NAV)
+
+                # ---------------------------------------------
+                # EZ AZ ÉV
+                # ---------------------------------------------
+                print("'Ez az év' kiválasztása...")
+
+                page.get_by_role(
+                    "button",
+                    name="Ez az év",
+                    exact=True
+                ).click()
+
+                time.sleep(WAIT_NAV)
+
+                # ---------------------------------------------
+                # MODÁLIS XLSX LETÖLTÉS
+                # ---------------------------------------------
+                print("XLSX export indítása...")
+
+                # A modal megnyitása után két "XLSX letöltése"
+                # gomb is lehet a DOM-ban.
+                # A látható, modális gombot választjuk.
+                modal_xlsx_button = page.get_by_role(
+                    "button",
+                    name="XLSX letöltése",
+                    exact=True
+                ).last
+
+                with page.expect_download(timeout=120000) as download_info:
+                    modal_xlsx_button.click()
+
+                download = download_info.value
+
+                original_filename = download.suggested_filename
+
+                extension = Path(original_filename).suffix or ".xlsx"
+
+                filename = (
+                    f"{safe_filename(company_name)}"
+                    f"_ez_az_ev{extension}"
+                )
+
+                destination = DOWNLOAD_DIR / filename
+
+                download.save_as(str(destination))
+
+                print("LETÖLTVE:")
+                print(destination)
+
+                # Következő művelet előtt kis várakozás
+                time.sleep(WAIT_NAV)
+
+            except Exception as e:
+                print(f"HIBA ennél a cégnél: {company_name}")
+                print(str(e))
+
+                # Ha valamilyen modal nyitva maradt, megpróbáljuk bezárni
                 try:
-                    for index, (company_name, config) in enumerate(COMPANIES.items(), 1):
-                        stage = "Cég kiválasztása"
-                        print(f"\n[{index}/{len(COMPANIES)}] {company_name}", flush=True)
-                        try:
-                            company = unit_buttons(page).filter(
-                                has=page.locator(
-                                    "span.truncate",
-                                    has_text=re.compile(r"^" + re.escape(company_name) + r"$"),
-                                )
-                            )
-                            company.click()
-                            pause(page, WAIT_COMPANY)
+                    cancel_button = page.get_by_role(
+                        "button",
+                        name="Mégse",
+                        exact=True
+                    )
 
-                            stage = "XLSX menü megnyitása"
-                            page.get_by_role("button", name="XLSX letöltése", exact=True).first.click()
-                            pause(page, WAIT_NAV)
+                    if cancel_button.is_visible():
+                        cancel_button.click()
+                        time.sleep(WAIT_NAV)
 
-                            stage = "Ez az év kiválasztása"
-                            page.get_by_role("button", name="Ez az év", exact=True).click()
-                            pause(page, WAIT_NAV)
+                except Exception:
+                    pass
 
-                            stage = "XLSX letöltése"
-                            with page.expect_download(timeout=180000) as download_info:
-                                page.get_by_role("button", name="XLSX letöltése", exact=True).last.click()
-                            download = download_info.value
-                            xlsx_path = directory / f"{config['code']}_{year}.xlsx"
-                            download.save_as(str(xlsx_path))
-                            print(f"XLSX: {xlsx_path.stat().st_size / 1048576:.2f} MB", flush=True)
-                            pause(page, WAIT_NAV)
-                            close_export_dialog(page)
+                # Nem állítjuk le az egész robotot, hanem megyünk a következő cégre
+                continue
 
-                            stage = "CSV készítése"
-                            csv_path = directory / f"hotelconnect_{config['code']}_{year}.csv"
-                            count = xlsx_to_csv(xlsx_path, csv_path)
-                            print(f"CSV: {csv_path.stat().st_size / 1048576:.2f} MB, {count} sor", flush=True)
+        # =====================================================
+        # KÉSZ
+        # =====================================================
 
-                            stage = "Google Drive feltöltés"
-                            upload_or_replace_file(drive_service, csv_path, config["folder_id"])
-                            successful.append(company_name)
-                            print(f"KÉSZ: {company_name}", flush=True)
-                            xlsx_path.unlink(missing_ok=True)
-                            csv_path.unlink(missing_ok=True)
-                            pause(page, WAIT_NAV)
-                        except Exception as error:
-                            failed.append(company_name)
-                            print(f"HIBA [{stage}] {company_name}: {redact(error)}", flush=True)
-                            with suppress(Exception):
-                                close_export_dialog(page)
-                finally:
-                    drive_service.close()
-                context.close()
-            finally:
-                browser.close()
+        print("\n" + "=" * 60)
+        print("MINDEN CÉG FELDOLGOZÁSA BEFEJEZŐDÖTT")
+        print("=" * 60)
 
-    print(f"\nSikeres: {len(successful)}/7. Hibás: {len(failed)}.", flush=True)
-    if failed:
-        raise RuntimeError("Sikertelen egységek: " + ", ".join(failed))
+        print("Letöltési mappa:")
+        print(DOWNLOAD_DIR)
+
+        if sys.stdin.isatty():
+            input("\nENTER = böngésző bezárása...")
+
+        browser.close()
 
 
 if __name__ == "__main__":
-    try:
-        run()
-    except Exception as error:
-        # Nincs titkokat is tartalmazhato, szuretlen traceback.
-        print(f"\nHIBA: {redact(error)}", file=sys.stderr, flush=True)
-        sys.exit(1)
+    main()
