@@ -14,8 +14,8 @@ LOGIN_URL = "https://p.hotelconnect.hu/login"
 EMAIL = os.environ.get("HOTELCONNECT_EMAIL", "buki.bertold@mavericklodges.com")
 PASSWORD = os.environ.get("HOTELCONNECT_PASSWORD", "Lebonote10@@@@")
 
-# A Google Drive-on létrehozott főmappa neve
-PARENT_FOLDER_NAME = "HotelConnect"
+# A Google Drive-on lévő főmappa ID-ja
+PARENT_FOLDER_ID = os.environ.get("GDRIVE_PARENT_FOLDER_ID", "1G1q39LJ_V40mVArukrWwhUCusW13ViIF")
 
 # Temp letöltési mappa
 DOWNLOAD_DIR = Path.home() / "Downloads"
@@ -44,38 +44,8 @@ def get_drive_service():
         return None
 
 
-def get_parent_folder_id(drive_service, parent_name=PARENT_FOLDER_NAME):
-    """Megkeresi a 'HotelConnect' nevű főmappát a Google Drive-on."""
-    if not drive_service:
-        return None
-    try:
-        query = (
-            f"name = '{parent_name}' and "
-            f"mimeType = 'application/vnd.google-apps.folder' and "
-            f"trashed = false"
-        )
-        results = drive_service.files().list(
-            q=query,
-            fields="files(id, name)",
-            supportsAllDrives=True,
-            includeItemsFromAllDrives=True
-        ).execute()
-        files = results.get("files", [])
-
-        if files:
-            folder_id = files[0]["id"]
-            print(f"  -> Főmappa megtalálva: '{parent_name}' (ID: {folder_id})")
-            return folder_id
-        else:
-            print(f"  -> HIBA: Nem található '{parent_name}' nevű mappa a Google Drive-on!")
-            return None
-    except Exception as e:
-        print(f"  -> HIBA a(z) '{parent_name}' főmappa keresésekor: {e}")
-        return None
-
-
 def get_or_create_company_folder(drive_service, parent_id, company_name):
-    """Megkeresi vagy létrehozza a cég almappáját a HotelConnect főmappában."""
+    """Megkeresi vagy létrehozza a cég almappáját a főmappában."""
     if not drive_service or not parent_id:
         return None
     try:
@@ -96,7 +66,6 @@ def get_or_create_company_folder(drive_service, parent_id, company_name):
         if files:
             return files[0]["id"]
 
-        # Ha nem létezik az almappa, létrehozzuk a HotelConnect mappán belül
         folder_metadata = {
             "name": company_name,
             "mimeType": "application/vnd.google-apps.folder",
@@ -120,7 +89,6 @@ def upload_and_cleanup(drive_service, file_path, folder_id, file_name):
         return
 
     try:
-        # Keresés meglévő fájlra
         query = f"'{folder_id}' in parents and name = '{file_name}' and trashed = false"
         results = drive_service.files().list(
             q=query,
@@ -133,7 +101,6 @@ def upload_and_cleanup(drive_service, file_path, folder_id, file_name):
         media = MediaFileUpload(str(file_path), resumable=True)
 
         if files:
-            # Meglévő fájl frissítése (régi felülírása)
             file_id = files[0]["id"]
             drive_service.files().update(
                 fileId=file_id,
@@ -142,14 +109,12 @@ def upload_and_cleanup(drive_service, file_path, folder_id, file_name):
             ).execute()
             print(f"  -> Google Drive: Régi fájl felülírva és frissítve: {file_name}")
 
-            # Ha esetleg korábbról több duplikátum maradt volna fent, a többit töröljük
             for extra_file in files[1:]:
                 drive_service.files().delete(
                     fileId=extra_file["id"],
                     supportsAllDrives=True
                 ).execute()
         else:
-            # Új fájl létrehozása
             file_metadata = {
                 "name": file_name,
                 "parents": [folder_id]
@@ -162,7 +127,6 @@ def upload_and_cleanup(drive_service, file_path, folder_id, file_name):
             ).execute()
             print(f"  -> Google Drive: Új fájl sikeresen feltöltve: {file_name}")
 
-        # Helyi ideiglenes fájl törlése a sikeres feltöltés után
         if file_path.exists():
             file_path.unlink()
             print("  -> Helyi ideiglenes fájl törölve.")
@@ -188,10 +152,6 @@ def safe_filename(name):
 
 def main():
     drive_service = get_drive_service()
-    parent_folder_id = None
-
-    if drive_service:
-        parent_folder_id = get_parent_folder_id(drive_service, PARENT_FOLDER_NAME)
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=False)
@@ -317,9 +277,9 @@ def main():
                 # ---------------------------------------------
                 # DRIVE ALMAPPA KERESÉSE / LÉTREHOZÁSA ÉS FELTÖLTÉS
                 # ---------------------------------------------
-                if parent_folder_id and drive_service:
+                if PARENT_FOLDER_ID and drive_service:
                     company_folder_id = get_or_create_company_folder(
-                        drive_service, parent_folder_id, company_name
+                        drive_service, PARENT_FOLDER_ID, company_name
                     )
 
                     if company_folder_id:
@@ -330,7 +290,7 @@ def main():
                     else:
                         print(f"FIGYELEM: Nem sikerült felkészíteni a cég almappáját: {company_name}")
                 else:
-                    print("FIGYELEM: A fő 'HotelConnect' mappa nem található, feltöltés kihagyva.")
+                    print("FIGYELEM: A fő PARENT_FOLDER_ID nincs megadva vagy hibás, feltöltés kihagyva.")
 
                 time.sleep(WAIT_NAV)
 
