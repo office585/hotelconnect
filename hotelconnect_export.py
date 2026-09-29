@@ -19,7 +19,7 @@ DOWNLOAD_DIR = Path.home() / "Downloads"
 DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 # Szigorú várakozási idők
-LOGIN_TIMEOUT_MS = 15000  # 15 másodperc (ha elakad, azonnal elszáll)
+LOGIN_TIMEOUT_MS = 15000
 WAIT_COMPANY = 3
 WAIT_NAV = 2
 
@@ -59,7 +59,12 @@ def upload_to_drive(drive_service, file_path, folder_id, file_name):
 
     try:
         query = f"'{folder_id}' in parents and name = '{file_name}' and trashed = false"
-        results = drive_service.files().list(q=query, fields="files(id, name)").execute()
+        results = drive_service.files().list(
+            q=query,
+            fields="files(id, name)",
+            supportsAllDrives=True,
+            includeItemsFromAllDrives=True
+        ).execute()
         files = results.get("files", [])
 
         media = MediaFileUpload(str(file_path), resumable=True)
@@ -68,7 +73,8 @@ def upload_to_drive(drive_service, file_path, folder_id, file_name):
             file_id = files[0]["id"]
             drive_service.files().update(
                 fileId=file_id,
-                media_body=media
+                media_body=media,
+                supportsAllDrives=True
             ).execute()
             print(f"  -> Drive fájl frissítve: {file_name}")
         else:
@@ -79,7 +85,8 @@ def upload_to_drive(drive_service, file_path, folder_id, file_name):
             drive_service.files().create(
                 body=file_metadata,
                 media_body=media,
-                fields="id"
+                fields="id",
+                supportsAllDrives=True
             ).execute()
             print(f"  -> Drive fájl feltöltve: {file_name}")
     except Exception as e:
@@ -118,7 +125,7 @@ def main():
         page.set_default_timeout(30000)
 
         # =====================================================
-        # LOGIN (ENTER + KATTINTÁS KETTŐS PRÓBÁLKOZÁS)
+        # LOGIN
         # =====================================================
         print("Login oldal megnyitása...")
         page.goto(LOGIN_URL, wait_until="domcontentloaded")
@@ -136,37 +143,24 @@ def main():
 
         time.sleep(0.5)
 
-        print("Bejelentkezés indítása (Enter + Gomb kattintás)...")
-        # 1. Enter lenyomása a jelszó mezőben
+        print("Bejelentkezés indítása...")
         password_field.press("Enter")
         time.sleep(0.3)
 
-        # 2. Kattintás a pontos gombra matches type=submit
         submit_btn = page.locator('button[type="submit"]').filter(has_text="Bejelentkezés")
         if submit_btn.is_visible():
             submit_btn.click(force=True)
 
-        # Várakozás maximum 15 mp-ig a sikeres belépésre
-        print(f"Várakozás a sikeres bejelentkezésre (Szigorú timeout: {LOGIN_TIMEOUT_MS // 1000} mp)...")
+        print(f"Várakozás a sikeres bejelentkezésre...")
         try:
             company_buttons = page.locator('aside button').filter(has=page.locator("span.truncate"))
             company_buttons.first.wait_for(state="visible", timeout=LOGIN_TIMEOUT_MS)
         except Exception as e:
             page.screenshot(path="login_error.png")
-            print(f"\n[HIBA] Nem sikerült belépni {LOGIN_TIMEOUT_MS // 1000} mp alatt!")
-            print(f"Aktuális URL: {page.url}")
-            print("Képernyőkép elmentve: login_error.png")
-
-            # Látható hibaüzenet kiírása
-            alerts = page.locator('[role="alert"], .text-red-500, .error-message')
-            if alerts.count() > 0:
-                print("Hibaüzenet az oldalon:", alerts.first.inner_text().strip())
-
+            print(f"\n[HIBA] Nem sikerült belépni!")
             raise e
 
         print("Sikeres belépés!")
-        print("Aktuális URL:", page.url)
-
         time.sleep(WAIT_COMPANY)
 
         # =====================================================
@@ -192,9 +186,6 @@ def main():
             print("=" * 60)
 
             try:
-                # ---------------------------------------------
-                # CÉGVÁLTÁS
-                # ---------------------------------------------
                 print(f"Cég kiválasztása: {company_name}")
 
                 company_button = page.locator('aside button').filter(
@@ -204,38 +195,24 @@ def main():
                 company_button.click()
                 time.sleep(WAIT_COMPANY)
 
-                # ---------------------------------------------
-                # XLSX LETÖLTÉSE - FŐ GOMB
-                # ---------------------------------------------
                 print("XLSX letöltése menü megnyitása...")
-
                 xlsx_buttons = page.get_by_role(
                     "button",
                     name="XLSX letöltése",
                     exact=True
                 )
-
                 xlsx_buttons.first.click()
                 time.sleep(WAIT_NAV)
 
-                # ---------------------------------------------
-                # EZ AZ ÉV
-                # ---------------------------------------------
                 print("'Ez az év' kiválasztása...")
-
                 page.get_by_role(
                     "button",
                     name="Ez az év",
                     exact=True
                 ).click()
-
                 time.sleep(WAIT_NAV)
 
-                # ---------------------------------------------
-                # MODÁLIS XLSX LETÖLTÉS
-                # ---------------------------------------------
                 print("XLSX export indítása...")
-
                 modal_xlsx_button = page.get_by_role(
                     "button",
                     name="XLSX letöltése",
@@ -255,9 +232,7 @@ def main():
                 download.save_as(str(destination))
                 print(f"Letöltve helyileg: {destination}")
 
-                # ---------------------------------------------
-                # GOOGLE DRIVE FELTÖLTÉS
-                # ---------------------------------------------
+                # Drive feltöltés
                 folder_id = DRIVE_FOLDERS.get(company_name)
                 if not folder_id:
                     for key, f_id in DRIVE_FOLDERS.items():
@@ -283,19 +258,14 @@ def main():
                         name="Mégse",
                         exact=True
                     )
-
                     if cancel_button.is_visible():
                         cancel_button.click()
                         time.sleep(WAIT_NAV)
-
                 except Exception:
                     pass
 
                 continue
 
-        # =====================================================
-        # KÉSZ
-        # =====================================================
         print("\n" + "=" * 60)
         print("MINDEN CÉG FELDOLGOZÁSA BEFEJEZŐDÖTT")
         print("=" * 60)
