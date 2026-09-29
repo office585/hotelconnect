@@ -1,0 +1,37 @@
+name: HotelConnect Export
+
+on:
+  workflow_dispatch:
+
+  schedule:
+    - cron: "5 0 * * *"
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python setup
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python packages
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install Playwright Chromium
+        run: |
+          playwright install chromium --with-deps
+
+      - name: Run HotelConnect export
+        env:
+          HOTELCONNECT_EMAIL: ${{ secrets.HOTELCONNECT_EMAIL }}
+          HOTELCONNECT_PASSWORD: ${{ secrets.HOTELCONNECT_PASSWORD }}
+          GDRIVE_SERVICE_ACCOUNT_JSON: ${{ secrets.GDRIVE_SERVICE_ACCOUNT_JSON }}
+        run: |
+          python hotelconnect_export.py
