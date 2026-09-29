@@ -7,26 +7,52 @@ on:
     - cron: "5 0 * * *"
 
 jobs:
-  export:
+  hotelconnect-export:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      # ======================================================
+      # REPOSITORY LETÖLTÉSE
+      # ======================================================
+
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Python setup
+      # ======================================================
+      # PYTHON
+      # ======================================================
+
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
+      # ======================================================
+      # PYTHON CSOMAGOK
+      # ======================================================
 
       - name: Install Python packages
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      # ======================================================
+      # PLAYWRIGHT + CHROMIUM
+      # ======================================================
+
       - name: Install Playwright Chromium
         run: |
           playwright install chromium --with-deps
+
+      # ======================================================
+      # HOTELCONNECT ROBOT
+      #
+      # FONTOS:
+      # Pythonban headless=False van.
+      #
+      # GitHub Linux runneren ezért xvfb-run alatt futtatjuk,
+      # hogy legyen virtuális kijelző.
+      # ======================================================
 
       - name: Run HotelConnect export
         env:
@@ -34,4 +60,4 @@ jobs:
           HOTELCONNECT_PASSWORD: ${{ secrets.HOTELCONNECT_PASSWORD }}
           GDRIVE_SERVICE_ACCOUNT_JSON: ${{ secrets.GDRIVE_SERVICE_ACCOUNT_JSON }}
         run: |
-          python hotelconnect_export.py
+          xvfb-run -a python hotelconnect_export.py
