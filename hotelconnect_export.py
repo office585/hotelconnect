@@ -14,7 +14,7 @@ LOGIN_URL = "https://p.hotelconnect.hu/login"
 EMAIL = os.environ.get("HOTELCONNECT_EMAIL", "buki.bertold@mavericklodges.com")
 PASSWORD = os.environ.get("HOTELCONNECT_PASSWORD", "Lebonote10@@@@")
 
-# Temp / Letöltési mappa
+# Temp letöltési mappa
 DOWNLOAD_DIR = Path.home() / "Downloads"
 DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -23,7 +23,7 @@ LOGIN_TIMEOUT_MS = 15000
 WAIT_COMPANY = 3
 WAIT_NAV = 2
 
-# Cégek és Google Drive mappa azonosítók
+# Google Drive Megosztott Meghajtó Mappa ID-k
 DRIVE_FOLDERS = {
     "Maverick Athenaeum": "19bo5GiU6lrPEgfrSbJrO74e7pWD9Ng7U",
     "Maverick Downtown": "1HjE1CMPEIYHqG6HA7aPc5OqG0GAfHdXU",
@@ -36,10 +36,10 @@ DRIVE_FOLDERS = {
 
 
 def get_drive_service():
-    """Google Drive kliens inicializálása Secretből."""
+    """Google Drive API kliens inicializálása Secretből."""
     json_str = os.environ.get("GDRIVE_SERVICE_ACCOUNT_JSON")
     if not json_str:
-        print("FIGYELEM: GDRIVE_SERVICE_ACCOUNT_JSON nincs megadva, Drive feltöltés kihagyva.")
+        print("FIGYELEM: GDRIVE_SERVICE_ACCOUNT_JSON nincs megadva!")
         return None
     try:
         info = json.loads(json_str)
@@ -53,11 +53,12 @@ def get_drive_service():
 
 
 def upload_to_drive(drive_service, file_path, folder_id, file_name):
-    """Fájl feltöltése vagy frissítése a cél Drive mappában."""
+    """Fájl feltöltése vagy frissítése a Megosztott Meghajtó célmappájában."""
     if not drive_service or not folder_id:
         return
 
     try:
+        # Lévő fájl keresése a Megosztott Meghajtón
         query = f"'{folder_id}' in parents and name = '{file_name}' and trashed = false"
         results = drive_service.files().list(
             q=query,
@@ -70,14 +71,16 @@ def upload_to_drive(drive_service, file_path, folder_id, file_name):
         media = MediaFileUpload(str(file_path), resumable=True)
 
         if files:
+            # Létező fájl frissítése
             file_id = files[0]["id"]
             drive_service.files().update(
                 fileId=file_id,
                 media_body=media,
                 supportsAllDrives=True
             ).execute()
-            print(f"  -> Drive fájl frissítve: {file_name}")
+            print(f"  -> Google Drive: Fájl sikeresen frissítve: {file_name}")
         else:
+            # Új fájl feltöltése
             file_metadata = {
                 "name": file_name,
                 "parents": [folder_id]
@@ -88,7 +91,7 @@ def upload_to_drive(drive_service, file_path, folder_id, file_name):
                 fields="id",
                 supportsAllDrives=True
             ).execute()
-            print(f"  -> Drive fájl feltöltve: {file_name}")
+            print(f"  -> Google Drive: Fájl sikeresen feltöltve: {file_name}")
     except Exception as e:
         print(f"  -> HIBA a Drive feltöltéskor ({file_name}): {e}")
 
@@ -151,13 +154,13 @@ def main():
         if submit_btn.is_visible():
             submit_btn.click(force=True)
 
-        print(f"Várakozás a sikeres bejelentkezésre...")
+        print("Várakozás a sikeres bejelentkezésre...")
         try:
             company_buttons = page.locator('aside button').filter(has=page.locator("span.truncate"))
             company_buttons.first.wait_for(state="visible", timeout=LOGIN_TIMEOUT_MS)
         except Exception as e:
             page.screenshot(path="login_error.png")
-            print(f"\n[HIBA] Nem sikerült belépni!")
+            print("\n[HIBA] Nem sikerült belépni!")
             raise e
 
         print("Sikeres belépés!")
@@ -232,7 +235,9 @@ def main():
                 download.save_as(str(destination))
                 print(f"Letöltve helyileg: {destination}")
 
-                # Drive feltöltés
+                # ---------------------------------------------
+                # FELTÖLTÉS GOOGLE DRIVE MEGOSZTOTT MEGHAJTÓRA
+                # ---------------------------------------------
                 folder_id = DRIVE_FOLDERS.get(company_name)
                 if not folder_id:
                     for key, f_id in DRIVE_FOLDERS.items():
@@ -241,10 +246,10 @@ def main():
                             break
 
                 if folder_id:
-                    print(f"Feltöltés Google Drive-ra (Folder ID: {folder_id})...")
+                    print(f"Feltöltés a Google Drive Megosztott Meghajtóra (Folder ID: {folder_id})...")
                     upload_to_drive(drive_service, destination, folder_id, filename)
                 else:
-                    print(f"FIGYELEM: Nincs Drive mappa társítva ehhez a céghez: {company_name}")
+                    print(f"FIGYELEM: Nincs Drive mappa azonosító ehhez a céghez: {company_name}")
 
                 time.sleep(WAIT_NAV)
 
