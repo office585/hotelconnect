@@ -1,5 +1,4 @@
 playwright
-openpyxl
 google-api-python-client
 google-auth
 google-auth-httplib2
