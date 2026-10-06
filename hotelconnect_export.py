@@ -21,7 +21,7 @@ PARENT_FOLDER_ID = os.environ.get("GDRIVE_PARENT_FOLDER_ID", "1G1q39LJ_V40mVAruk
 DOWNLOAD_DIR = Path.home() / "Downloads"
 DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-# Szigorú várakozási idők (30 mp a lassabb betöltésekhez)
+# Szigorú várakozási idők
 LOGIN_TIMEOUT_MS = 30000
 WAIT_COMPANY = 3
 WAIT_NAV = 2
@@ -344,4 +344,37 @@ def main():
                     else:
                         print(f"FIGYELEM: Nem sikerült felkészíteni a cég almappáját: {company_name}")
                 else:
-                    print("FIGYELEM: A fő PARENT_FOLDER_ID nincs megadva vagy hibás, feltöltés
+                    print("FIGYELEM: A fő PARENT_FOLDER_ID nincs megadva vagy hibás, feltöltés kihagyva.")
+
+                time.sleep(WAIT_NAV)
+
+            except Exception as e:
+                print(f"HIBA ennél a cégnél: {company_name}")
+                print(str(e))
+
+                try:
+                    cancel_button = page.get_by_role(
+                        "button",
+                        name="Mégse",
+                        exact=True
+                    )
+                    if cancel_button.is_visible():
+                        cancel_button.click()
+                        time.sleep(WAIT_NAV)
+                except Exception:
+                    pass
+
+                continue
+
+        print("\n" + "=" * 60)
+        print("MINDEN CÉG FELDOLGOZÁSA BEFEJEZŐDÖTT")
+        print("=" * 60)
+
+        if sys.stdin.isatty():
+            input("\nENTER = böngésző bezárása...")
+
+        browser.close()
+
+
+if __name__ == "__main__":
+    main()
