@@ -228,6 +228,9 @@ def main():
             print("=" * 60)
 
             try:
+                # ---------------------------------------------
+                # CÉGVÁLTÁS
+                # ---------------------------------------------
                 print(f"Cég kiválasztása: {company_name}")
 
                 company_button = page.locator('aside button').filter(
@@ -237,6 +240,24 @@ def main():
                 company_button.click()
                 time.sleep(WAIT_COMPANY)
 
+                # ---------------------------------------------
+                # SZÁLLÁSHELY MEGNYITÁSA (DASHBOARD)
+                # ---------------------------------------------
+                print("Szálláshely megnyitása...")
+                open_tenant_btn = page.get_by_role(
+                    "link",
+                    name="Szálláshely megnyitása"
+                )
+                if open_tenant_btn.is_visible():
+                    open_tenant_btn.click()
+                else:
+                    page.locator('a', has_text="Szálláshely megnyitása").first.click()
+
+                time.sleep(WAIT_NAV)
+
+                # ---------------------------------------------
+                # XLSX LETÖLTÉSE - FŐ GOMB
+                # ---------------------------------------------
                 print("XLSX letöltése menü megnyitása...")
                 xlsx_buttons = page.get_by_role(
                     "button",
@@ -246,6 +267,9 @@ def main():
                 xlsx_buttons.first.click()
                 time.sleep(WAIT_NAV)
 
+                # ---------------------------------------------
+                # EZ AZ ÉV
+                # ---------------------------------------------
                 print("'Ez az év' kiválasztása...")
                 page.get_by_role(
                     "button",
@@ -254,6 +278,9 @@ def main():
                 ).click()
                 time.sleep(WAIT_NAV)
 
+                # ---------------------------------------------
+                # MODÁLIS XLSX LETÖLTÉS
+                # ---------------------------------------------
                 print("XLSX export indítása...")
                 modal_xlsx_button = page.get_by_role(
                     "button",
