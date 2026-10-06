@@ -241,19 +241,25 @@ def main():
                 time.sleep(WAIT_COMPANY)
 
                 # ---------------------------------------------
-                # SZÁLLÁSHELY MEGNYITÁSA (DASHBOARD)
+                # SZÁLLÁSHELY MEGNYITÁSA (HA VAN ILYEN GOMB)
                 # ---------------------------------------------
-                print("Szálláshely megnyitása...")
-                open_tenant_btn = page.get_by_role(
-                    "link",
-                    name="Szálláshely megnyitása"
-                )
-                if open_tenant_btn.is_visible():
-                    open_tenant_btn.click()
-                else:
-                    page.locator('a', has_text="Szálláshely megnyitása").first.click()
+                try:
+                    open_tenant_btn = page.get_by_role(
+                        "link",
+                        name="Szálláshely megnyitása"
+                    ).first
 
-                time.sleep(WAIT_NAV)
+                    if not open_tenant_btn.is_visible():
+                        open_tenant_btn = page.locator('a', has_text="Szálláshely megnyitása").first
+
+                    if open_tenant_btn.is_visible(timeout=3000):
+                        print("'Szálláshely megnyitása' gomb megtalálva, rákattintás...")
+                        open_tenant_btn.click()
+                        time.sleep(WAIT_NAV)
+                    else:
+                        print("'Szálláshely megnyitása' gomb nem található, folytatás az exporttal...")
+                except Exception:
+                    print("'Szálláshely megnyitása' kihagyva, folytatás az exporttal...")
 
                 # ---------------------------------------------
                 # XLSX LETÖLTÉSE - FŐ GOMB
