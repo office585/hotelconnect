@@ -21,8 +21,8 @@ PARENT_FOLDER_ID = os.environ.get("GDRIVE_PARENT_FOLDER_ID", "1G1q39LJ_V40mVAruk
 DOWNLOAD_DIR = Path.home() / "Downloads"
 DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-# Szigorú várakozási idők
-LOGIN_TIMEOUT_MS = 15000
+# Szigorú várakozási idők (30 mp a lassabb betöltésekhez)
+LOGIN_TIMEOUT_MS = 30000
 WAIT_COMPANY = 3
 WAIT_NAV = 2
 
@@ -195,11 +195,32 @@ def main():
 
         print("Várakozás a sikeres bejelentkezésre...")
         try:
+            page.wait_for_url(lambda u: "/login" not in u, timeout=LOGIN_TIMEOUT_MS)
+        except Exception:
+            pass
+
+        time.sleep(WAIT_NAV)
+
+        # Belépés utáni esetleges gombkezelés a nyitóoldalon
+        try:
+            open_tenant_btn = page.get_by_role("link", name="Szálláshely megnyitása").first
+            if not open_tenant_btn.is_visible():
+                open_tenant_btn = page.locator('a', has_text="Szálláshely megnyitása").first
+
+            if open_tenant_btn.is_visible(timeout=3000):
+                print("Belépés után 'Szálláshely megnyitása' gomb megtalálva, rákattintás...")
+                open_tenant_btn.click()
+                time.sleep(WAIT_NAV)
+        except Exception:
+            pass
+
+        # Oldalsáv cég gombjainak megvárása
+        try:
             company_buttons = page.locator('aside button').filter(has=page.locator("span.truncate"))
             company_buttons.first.wait_for(state="visible", timeout=LOGIN_TIMEOUT_MS)
         except Exception as e:
             page.screenshot(path="login_error.png")
-            print("\n[HIBA] Nem sikerült belépni!")
+            print("\n[HIBA] Nem jelentek meg a cég gombok a belépés után!")
             raise e
 
         print("Sikeres belépés!")
@@ -323,37 +344,4 @@ def main():
                     else:
                         print(f"FIGYELEM: Nem sikerült felkészíteni a cég almappáját: {company_name}")
                 else:
-                    print("FIGYELEM: A fő PARENT_FOLDER_ID nincs megadva vagy hibás, feltöltés kihagyva.")
-
-                time.sleep(WAIT_NAV)
-
-            except Exception as e:
-                print(f"HIBA ennél a cégnél: {company_name}")
-                print(str(e))
-
-                try:
-                    cancel_button = page.get_by_role(
-                        "button",
-                        name="Mégse",
-                        exact=True
-                    )
-                    if cancel_button.is_visible():
-                        cancel_button.click()
-                        time.sleep(WAIT_NAV)
-                except Exception:
-                    pass
-
-                continue
-
-        print("\n" + "=" * 60)
-        print("MINDEN CÉG FELDOLGOZÁSA BEFEJEZŐDÖTT")
-        print("=" * 60)
-
-        if sys.stdin.isatty():
-            input("\nENTER = böngésző bezárása...")
-
-        browser.close()
-
-
-if __name__ == "__main__":
-    main()
+                    print("FIGYELEM: A fő PARENT_FOLDER_ID nincs megadva vagy hibás, feltöltés
